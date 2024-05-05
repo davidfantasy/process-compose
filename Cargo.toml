@@ -17,7 +17,7 @@ winapi = { version = "0.3", features = [
     "consoleapi",
     "errhandlingapi",
 ] }
-nix = "0.28"
+nix = { version = "0.28", features = ["signal"] }
 signal-hook = "0.3"
 anyhow = "1.0"
 encoding = "0.2"

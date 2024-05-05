@@ -26,6 +26,9 @@ mod sys_service;
 
 fn main() {
     logger::init_log();
+    load_config()
+        .map_err(|e| Error::msg(format!("Failed to load config: {}", e)))
+        .unwrap();
     let args = Args::parse();
     if args.service_action.is_some() {
         let action = args.service_action.unwrap();
@@ -66,7 +69,7 @@ impl SysServiceProgram for Program {
 
 fn run() -> Result<()> {
     info!("process-compose starting...");
-    let config = load_config().map_err(|e| Error::msg(format!("Failed to load config: {}", e)))?;
+    let config = config::current_config();
     let services_congfig = config.services.values().cloned().collect();
     let services_ordered = analyze_service_dependencies(&services_congfig)?;
     process::manager::init_processes(&config, services_ordered)?;

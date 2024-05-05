@@ -167,7 +167,9 @@ pub fn stop_service(service_name: &str) -> Result<()> {
 }
 
 pub fn restart_service(service_name: &str, sender: Sender<ProcessEvent>) -> Result<()> {
-    stop_service(service_name)?;
+    if service_proc_is_running(service_name) {
+        stop_service(service_name)?;
+    }
     start_service(service_name, sender)?;
     Ok(())
 }
@@ -225,7 +227,7 @@ fn spawn_proc(conf: Arc<ServiceConfig>, sender: Sender<ProcessEvent>) -> Result<
                     update_proc_to_stopped(
                         sender.clone(),
                         svc_name,
-                        format!("exit code: {}", status.code().unwrap()).as_str(),
+                        format!("exit code: {}", status.code().or(Some(0)).unwrap()).as_str(),
                         child_proc.id(),
                     )?;
                 }

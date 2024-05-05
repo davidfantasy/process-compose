@@ -137,36 +137,54 @@ pub mod windows {
 #[cfg(target_os = "linux")]
 pub mod linux {
 
+    use anyhow::anyhow;
+    use anyhow::Result;
     use nix::sys::signal::{kill, Signal};
-    use nix::unistd::setpgid;
     use nix::unistd::Pid;
+    use nix::unistd::{getpgid, setpgid};
+    use std::convert::TryInto;
     use std::os::unix::process::CommandExt;
+    use std::process::Command;
 
     pub fn before_exec(cmd: &mut Command) -> Result<()> {
-        cmd.before_exec(|| {
-            // 在 Unix 平台上，设置新进程的进程组ID与其进程ID相同，这样它就会成为新的进程组的领导者
-            setpgid(nix::unistd::Pid::from_raw(0), nix::unistd::Pid::from_raw(0))
-                .map_err(|e| anyhow!("failed to setpgid: {}", e))
-        })
+        // 在 Unix 平台上，设置新进程的进程组ID与其进程ID相同，这样它就会成为新的进程组的领导者。
+        unsafe {
+            cmd.pre_exec(|| match setpgid(Pid::from_raw(0), Pid::from_raw(0)) {
+                Ok(_) => Ok(()),
+                Err(e) => Err(std::io::Error::new(std::io::ErrorKind::Other, e)),
+            });
+        }
+        Ok(())
     }
 
     pub fn terminate_process(pid: u32) -> Result<()> {
-        signal_proc(pid, Signal::SIGTERM)
+        pid.try_into()
+            .map_err(|_| anyhow!("PID out of range"))
+            .and_then(|pid| signal_proc(pid, Signal::SIGTERM))
     }
 
     pub fn kill_process(pid: u32) -> Result<()> {
-        signal_proc(pid, Signal::SIGKILL)
+        pid.try_into()
+            .map_err(|_| anyhow!("PID out of range"))
+            .and_then(|pid| signal_proc(pid, Signal::SIGKILL))
     }
 
     fn signal_proc(pid: i32, signal: Signal) -> Result<()> {
-        let pgid = getpgid(Pid::from_raw(pid))?;
-        //如果进程是当前的进程组长，则通过指定负数的pid向整个进程组发送信号
+        let pgid = getpgid(Some(Pid::from_raw(pid)))?;
+        // 如果进程是当前的进程组长，则通过指定负数的pid向整个进程组发送信号
         let pid = if pgid == Pid::from_raw(pid) {
             Pid::from_raw(-pid)
         } else {
             Pid::from_raw(pid)
         };
-        signal::kill(pid, signal)
-            .map_err(|e| anyhow!("failed to signal process: {},error:{}", pid, e));
+        kill(pid, signal).map_err(|e| {
+            anyhow!(
+                "failed to signal process with signal {:?} to pid {}: {}",
+                signal,
+                pid,
+                e
+            )
+        })?;
+        Ok(())
     }
 }

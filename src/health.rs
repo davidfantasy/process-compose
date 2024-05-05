@@ -26,10 +26,6 @@ pub fn start_watch(
         return;
     }
     if is_watching(&service_name) {
-        info!(
-            "service {} is already being watched, ignore start",
-            &service_name
-        );
         return;
     }
     set_watch_flag(&service_name);
