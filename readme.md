@@ -74,3 +74,6 @@ process-compose install  #将process-compose注册为系统服务
 process-compose start    #启动通过install注册的服务
 process-compose stop     #停止服务
 ```
+## 操作系统支持
+windows: windows 7及以上版本，
+linux: 支持systemd的主流发行版本
