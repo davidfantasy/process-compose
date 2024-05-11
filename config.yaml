@@ -1,0 +1,34 @@
+log_level: info #日志等级
+app_data_home: D://tmp//process-compose//home #所管服务的数据目录，默认是当前用户的主目录的.process-compose文件夹
+sys_service_name: process-compose # 注册为系统服务的服务名
+sys_service_desc: Process Monitoring and Management Tool #注册为系统服务的服务描述
+services:
+    #以下为受管服务配置，可配置多个服务
+    service1: #服务名
+      #启动延迟，秒；配置后会在轮到该服务启动时延迟执行启动命令，一般用于等待上游依赖服务启动完成
+      startup_delay: 5
+      #是否要重定向启动命令的日志输出到特定文件，作为服务日志（一般用于服务无法主动输出日志文件的场景），重定向的日志会放到{app_data_home}/{service_name}/logs目录下
+      log_redirect: false
+      healthcheck: 
+        enable: true    #是否启用健康检查
+        restart: true   #服务失败后是否尝试重启服务
+        url: http://localhost:23800/api/demo/test  #如果是web服务，可以配置健康检查接口，接口返回200认为是成功；默认仅检查进程是否仍在运行
+        interval: 10    #健康检查的间隔，秒
+        retries: 3      #健康检查失败多少次判断服务失败
+        check_delay: 5 #启动后，多少秒后才开始第一次健康检查
+      #启动命令，这里对.的路径做了调整，指向了服务自己的主目录
+      #例如 process-compose可执行文件放到了/home/nobody/app目录下
+      #那么./runtime/bin/java实际的路径是/home/nobody/app/service1/runtime/bin/java
+      start_cmd: ["./runtime/bin/java", "-jar","test.jar"] 
+      depends_on:
+        - service2  #所依赖的其它服务名
+    service2:
+      log_redirect: true 
+      healthcheck:
+        enable: true
+        restart: true 
+        interval: 10 
+        retries: 1    
+        start_period: 5
+      #实际启动路径为{process-compose所在目录}/service2/test
+      start_cmd: ["./test"]
