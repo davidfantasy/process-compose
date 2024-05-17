@@ -17,7 +17,6 @@ use sys_service::{control::control, manager::SysServiceProgram};
 use crate::{
     config::{analyze_service_dependencies, load_config},
     event::ProcessEvent,
-    process::status,
 };
 
 mod config;
@@ -29,10 +28,12 @@ mod process;
 mod sys_service;
 
 fn main() {
-    logger::init_log();
+    //先以默认等级初始化日志框架，避免初始化配置时的信息无法输出
+    logger::init_log("");
     load_config()
         .map_err(|e| Error::msg(format!("Failed to load config: {}", e)))
         .unwrap();
+    logger::change_log_level(config::current_config().log_level.as_str());
     let args = Args::parse();
     if args.service_action.is_some() {
         let action = args.service_action.unwrap();
@@ -82,13 +83,11 @@ fn run() -> Result<()> {
         .unwrap_or_else(|e| error!("create service home failed: {}", e));
     //注册服务事件处理器，并启动配置的服务
     let (tx, rx) = mpsc::channel::<ProcessEvent>();
-    let event_sender1 = tx.clone();
-    let event_sender2 = tx.clone();
     thread::spawn(move || {
-        event::handle_process_event(event_sender1, rx);
+        event::handle_process_event(tx, rx);
     });
     let all_services = process::status::get_all_process_name();
-    process::manager::start_services(all_services, event_sender2)
+    process::manager::start_services(all_services)
         .unwrap_or_else(|e| error!("start service failed: {}", e));
     Ok(())
 }

@@ -79,6 +79,9 @@ pub fn is_running_by_pid(pid: u32) -> bool {
 //更新服务进程的健康状态
 pub fn change_proc_health_status(name: &str, health: bool) -> Result<()> {
     update_proc_runtime(name, |proc| {
+        if proc.health.is_none() || proc.health.unwrap() != health {
+            info!("service [{}] health changed to {}", name, health)
+        }
         proc.health = Some(health);
     })?;
     Ok(())
@@ -91,8 +94,7 @@ pub fn is_heathy(name: &str) -> Option<bool> {
 }
 
 // 更新服务进程的运行状态至启动
-pub fn update_proc_to_started(
-    sender: Sender<ProcessEvent>,
+pub(crate) fn update_proc_to_started(
     service_name: &str,
     pid: u32,
     is_child_process: bool,
@@ -108,17 +110,12 @@ pub fn update_proc_to_started(
         pid.to_string().as_bytes(),
     )
     .unwrap_or_else(|e| error!("{} create pid file failed:{}", service_name, e));
-    event::send_process_event(sender, service_name, EventType::Running, None, Some(pid));
+    event::send_process_event(service_name, EventType::Running, None, Some(pid));
     Ok(())
 }
 
 // 更新服务进程的运行状态至停止
-pub fn update_proc_to_stopped(
-    sender: Sender<ProcessEvent>,
-    service_name: &str,
-    exit_msg: &str,
-    pid: u32,
-) -> Result<()> {
+pub(crate) fn update_proc_to_stopped(service_name: &str, exit_msg: &str, pid: u32) -> Result<()> {
     update_proc_runtime(service_name, |proc| {
         proc.pid = None;
         proc.last_stop_time = Some(SystemTime::now());
@@ -133,7 +130,6 @@ pub fn update_proc_to_stopped(
         EventType::Exited
     };
     event::send_process_event(
-        sender,
         service_name,
         event_type.clone(),
         Some(exit_msg.to_string()),
