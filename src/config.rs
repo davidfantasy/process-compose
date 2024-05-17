@@ -47,7 +47,6 @@ pub struct ServiceConfig {
     pub log_redirect: bool,
     pub log_pattern: Option<String>,
     pub healthcheck: Option<HealthCheckConfig>,
-    pub startup_delay: Option<i32>,
     pub start_cmd: Vec<String>,
     pub depends_on: Option<Vec<String>>,
 }
@@ -229,7 +228,6 @@ mod tests {
             log_redirect: false,
             log_pattern: None,
             healthcheck: None,
-            startup_delay: None,
             start_cmd: vec!["".to_owned()],
         }
     }

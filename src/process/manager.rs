@@ -3,108 +3,54 @@ use super::platform::linux::{before_exec, kill_process, terminate_process};
 
 #[cfg(target_os = "windows")]
 use super::platform::windows::{before_exec, kill_process, terminate_process};
-use crate::config::{GlobalConfig, ServiceConfig};
-use crate::env;
+use super::{pending, status};
+use crate::config::ServiceConfig;
+use crate::event::{EventType, ProcessEvent};
+use crate::{env, event};
 use anyhow::{Error, Result};
 use log::{error, info, warn};
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::mpsc::Sender;
-use std::sync::{Arc, RwLock};
-use std::time::{Duration, Instant, SystemTime};
-use std::{fs, thread};
-use sysinfo::{Pid, System};
+use std::sync::Arc;
+use std::thread;
+use std::time::{Duration, Instant};
 
-#[derive(Clone, Debug)]
-struct ProcessRuntimeInfo {
-    name: String,
-    pid: Option<u32>,
-    is_child_process: bool,
-    config: Arc<ServiceConfig>,
-    stopped_by_supervisor: bool,
-    last_start_time: Option<SystemTime>,
-    last_stop_time: Option<SystemTime>,
-    exit_err: Option<String>,
-}
-
-pub struct ProcessEvent {
-    pub service_name: String,
-    pub pid: Option<u32>,
-    pub event_type: EventType,
-    pub data: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum EventType {
-    //进程运行成功
-    Running = 1,
-    //进程被compose主动停止
-    Stopped = 2,
-    //进程自身退出
-    Exited = 3,
-}
-
-static PROCESSES: RwLock<Vec<RwLock<ProcessRuntimeInfo>>> = RwLock::new(Vec::new());
-
-pub fn init_processes(config: &GlobalConfig, start_orders: Vec<String>) -> Result<()> {
-    let mut process_map: HashMap<String, ServiceConfig> = HashMap::new();
-    for (name, svc_config) in config.services.iter() {
-        process_map.insert(name.clone(), svc_config.clone());
+pub fn start_services(services: Vec<String>, sender: Sender<ProcessEvent>) -> Result<()> {
+    if services.len() == 0 {
+        return Ok(());
     }
-    let mut processes = PROCESSES.write().unwrap();
-    // 按照启动顺序进行排序
-    for (_, name) in start_orders.iter().enumerate() {
-        if let Some(cfg) = process_map.get(name) {
-            let config = Arc::new(cfg.clone());
-            let mut proc = find_proc_from_pid_file(config.clone());
-            if proc.is_none() {
-                proc = Some(ProcessRuntimeInfo {
-                    name: name.clone(),
-                    pid: None,
-                    config: config.clone(),
-                    is_child_process: true,
-                    stopped_by_supervisor: false,
-                    last_start_time: None,
-                    last_stop_time: None,
-                    exit_err: None,
-                });
-            }
-            processes.push(RwLock::new(proc.unwrap()));
+    for name in services.iter() {
+        let service_info = status::find_readonly_proc_runtime(name);
+        if service_info.is_err() {
+            warn!("starting service {} not found:", name);
+            continue;
+        }
+        let service_info = service_info.unwrap();
+        let deps = &service_info.config.depends_on;
+        //仅启动没有依赖的服务，其它服务加入待启动列表
+        if deps.is_some() {
+            pending::add_pending_service(name, deps.clone().unwrap())
         } else {
-            return Err(Error::msg(format!(
-                "service {} was not found in the configuration.",
-                name
-            )));
+            start_service(name, sender.clone())?;
         }
     }
     Ok(())
 }
 
-pub fn start_all_services(sender: Sender<ProcessEvent>) -> Result<()> {
-    let processes = clone_processes();
-    if processes.len() == 0 {
-        return Ok(());
-    }
-    for proc in processes.iter() {
-        start_service(&proc.name, sender.clone())?;
-    }
-    Ok(())
-}
-
 pub fn start_service(service_name: &str, sender: Sender<ProcessEvent>) -> Result<()> {
-    let proc_runtime = find_readonly_proc_runtime(service_name)?;
+    let proc_runtime = status::find_readonly_proc_runtime(service_name)?;
     let conf = proc_runtime.config;
     let pid = proc_runtime.pid;
     let svc_name = service_name.to_string();
     if pid.is_some() {
         let pid_val = pid.unwrap();
-        if proc_is_running(pid_val) {
+        if status::is_running_by_pid(pid_val) {
             info!(
                 "{} process is already running with pid {}!",
                 service_name, pid_val
             );
-            send_process_event(&sender, service_name, EventType::Running, None, pid)?;
+            event::send_process_event(sender, service_name, EventType::Running, None, pid);
             return Ok(());
         }
     }
@@ -113,31 +59,32 @@ pub fn start_service(service_name: &str, sender: Sender<ProcessEvent>) -> Result
             error!("{} exited with error: {}", svc_name, err);
         }
     });
+    //已启动了服务，则从待启动列表中移除
+    pending::remove_pending_service(service_name);
     Ok(())
 }
 
-pub fn stop_all_services() -> Result<()> {
-    let processes = clone_processes();
-    if processes.len() == 0 {
+pub fn stop_services(services: Vec<String>) -> Result<()> {
+    if services.len() == 0 {
         return Ok(());
     }
-    for proc in processes.iter() {
-        stop_service(&proc.name)?;
+    for name in services.iter() {
+        stop_service(name)?;
     }
     Ok(())
 }
 
 pub fn stop_service(service_name: &str) -> Result<()> {
-    let proc_runtime = find_readonly_proc_runtime(service_name)?;
+    let proc_runtime = status::find_readonly_proc_runtime(service_name)?;
     let pid = proc_runtime.pid;
     if pid.is_none() {
         info!("{} process is not running!", service_name);
         return Ok(());
     }
     let pid_val = pid.unwrap();
-    let mut is_running = proc_is_running(pid_val);
+    let mut is_running = status::is_running_by_pid(pid_val);
     //更新进程的主动停止标志位
-    update_proc_runtime(service_name, |p| {
+    status::update_proc_runtime(service_name, |p| {
         p.stopped_by_supervisor = true;
     })?;
     if !is_running {
@@ -156,7 +103,7 @@ pub fn stop_service(service_name: &str) -> Result<()> {
     let timeout_duration = Duration::from_secs(2);
     while is_running && start_time.elapsed() <= timeout_duration {
         thread::sleep(Duration::from_millis(200));
-        is_running = proc_is_running(pid_val);
+        is_running = status::is_running_by_pid(pid_val);
     }
     //如果超过规定时间进程没有退出，则强制杀掉进程
     if is_running {
@@ -167,20 +114,11 @@ pub fn stop_service(service_name: &str) -> Result<()> {
 }
 
 pub fn restart_service(service_name: &str, sender: Sender<ProcessEvent>) -> Result<()> {
-    if service_proc_is_running(service_name) {
+    if status::is_running_by_name(service_name) {
         stop_service(service_name)?;
     }
     start_service(service_name, sender)?;
     Ok(())
-}
-
-pub fn service_proc_is_running(service_name: &str) -> bool {
-    let proc_runtime = find_readonly_proc_runtime(service_name).unwrap();
-    let pid = proc_runtime.pid;
-    if pid.is_none() {
-        return false;
-    }
-    proc_is_running(pid.unwrap())
 }
 
 fn spawn_proc(conf: Arc<ServiceConfig>, sender: Sender<ProcessEvent>) -> Result<()> {
@@ -219,12 +157,12 @@ fn spawn_proc(conf: Arc<ServiceConfig>, sender: Sender<ProcessEvent>) -> Result<
     match child {
         Ok(mut child_proc) => {
             //更新进程状态为已启动
-            update_proc_to_started(sender.clone(), svc_name, child_proc.id(), true)?;
+            status::update_proc_to_started(sender.clone(), svc_name, child_proc.id(), true)?;
             let exit_status = child_proc.wait().map_err(|e| format!("{}", e));
             match exit_status {
                 Ok(status) => {
                     //进程正常退出
-                    update_proc_to_stopped(
+                    status::update_proc_to_stopped(
                         sender.clone(),
                         svc_name,
                         format!("exit code: {}", status.code().or(Some(0)).unwrap()).as_str(),
@@ -233,7 +171,7 @@ fn spawn_proc(conf: Arc<ServiceConfig>, sender: Sender<ProcessEvent>) -> Result<
                 }
                 Err(err) => {
                     //进程异常退出
-                    update_proc_to_stopped(
+                    status::update_proc_to_stopped(
                         sender.clone(),
                         svc_name,
                         err.as_str(),
@@ -249,153 +187,6 @@ fn spawn_proc(conf: Arc<ServiceConfig>, sender: Sender<ProcessEvent>) -> Result<
     Ok(())
 }
 
-fn send_process_event(
-    sender: &Sender<ProcessEvent>,
-    service_name: &str,
-    event_type: EventType,
-    data: Option<String>,
-    pid: Option<u32>,
-) -> Result<()> {
-    if let Err(err) = sender.send(ProcessEvent {
-        service_name: service_name.to_string(),
-        pid: pid,
-        event_type: event_type.clone(),
-        data: data,
-    }) {
-        return Err(Error::msg(format!(
-            "send process event [{}:{:?}] error: {}",
-            pid.map_or_else(|| "unknown".to_string(), |pid| pid.to_string()),
-            event_type.clone(),
-            err
-        )));
-    }
-    Ok(())
-}
-
-// 更新服务进程的运行状态至启动
-fn update_proc_to_started(
-    sender: Sender<ProcessEvent>,
-    service_name: &str,
-    pid: u32,
-    is_child_process: bool,
-) -> Result<()> {
-    update_proc_runtime(service_name, |proc| {
-        proc.pid = Some(pid);
-        proc.last_start_time = Some(SystemTime::now());
-        proc.stopped_by_supervisor = false;
-        proc.is_child_process = is_child_process;
-    })?;
-    fs::write(
-        env::get_service_home(service_name).join("pid"),
-        pid.to_string().as_bytes(),
-    )
-    .unwrap_or_else(|e| error!("{} create pid file failed:{}", service_name, e));
-    send_process_event(&sender, service_name, EventType::Running, None, Some(pid))?;
-    Ok(())
-}
-
-// 更新服务进程的运行状态至停止
-fn update_proc_to_stopped(
-    sender: Sender<ProcessEvent>,
-    service_name: &str,
-    exit_msg: &str,
-    pid: u32,
-) -> Result<()> {
-    update_proc_runtime(service_name, |proc| {
-        proc.pid = None;
-        proc.last_stop_time = Some(SystemTime::now());
-        proc.exit_err = Some(exit_msg.to_string());
-    })?;
-    fs::remove_file(env::get_service_home(service_name).join("pid"))
-        .unwrap_or_else(|e| warn!("{} remove pid file failed:{}", service_name, e));
-    let proc_info = find_readonly_proc_runtime(service_name)?;
-    let event_type = if proc_info.stopped_by_supervisor {
-        EventType::Stopped
-    } else {
-        EventType::Exited
-    };
-    send_process_event(
-        &sender,
-        service_name,
-        event_type.clone(),
-        Some(exit_msg.to_string()),
-        Some(pid),
-    )?;
-    Ok(())
-}
-
-fn find_proc_from_pid_file(service_config: Arc<ServiceConfig>) -> Option<ProcessRuntimeInfo> {
-    let pid_path = env::get_service_home(&service_config.name).join("pid");
-    if pid_path.exists() {
-        let pid_str = fs::read_to_string(pid_path).unwrap();
-        let pid = pid_str.trim().parse::<u32>().unwrap();
-        if proc_is_running(pid) {
-            return Some(ProcessRuntimeInfo {
-                name: service_config.name.clone(),
-                pid: Some(pid),
-                is_child_process: false,
-                config: service_config,
-                stopped_by_supervisor: false,
-                last_start_time: Some(SystemTime::now()),
-                last_stop_time: None,
-                exit_err: None,
-            });
-        }
-    }
-    None
-}
-
-fn clone_processes() -> Vec<ProcessRuntimeInfo> {
-    let mut processes_clone: Vec<ProcessRuntimeInfo> = Vec::new();
-    let processes = PROCESSES.read().unwrap();
-    for (_, process) in processes.iter().enumerate() {
-        let process = process.read().unwrap();
-        processes_clone.push(process.clone());
-    }
-    return processes_clone;
-}
-
-fn find_readonly_proc_runtime(name: &str) -> Result<ProcessRuntimeInfo> {
-    let processes = PROCESSES.read().unwrap();
-    for (_, process) in processes.iter().enumerate() {
-        let process = process.read().unwrap();
-        if process.name == name {
-            return Ok(process.clone());
-        }
-    }
-    Err(Error::msg(format!(
-        "can not find process config for service:{}",
-        name
-    )))
-}
-
-fn update_proc_runtime<F>(service_name: &str, update_func: F) -> Result<()>
-where
-    F: Fn(&mut ProcessRuntimeInfo),
-{
-    let mut processes = PROCESSES.write().unwrap();
-    if let Some(proc) = processes
-        .iter_mut()
-        .find(|p| p.read().unwrap().name == service_name)
-    {
-        let mut proc = proc.write().unwrap();
-        update_func(&mut proc);
-        Ok(())
-    } else {
-        Err(Error::msg(format!(
-            "can not find process config for service:{}",
-            service_name
-        )))
-    }
-}
-
-fn proc_is_running(pid: u32) -> bool {
-    let pid = Pid::from(pid as usize);
-    let mut s = System::new();
-    s.refresh_processes();
-    s.process(pid).is_some()
-}
-
 #[cfg(test)]
 mod tests {
     use log::LevelFilter;
@@ -405,10 +196,10 @@ mod tests {
         Config,
     };
 
-    use crate::config;
+    use crate::config::{self, GlobalConfig};
 
     use super::*;
-    use std::sync::mpsc;
+    use std::{collections::HashMap, sync::mpsc};
 
     fn init_test_log() {
         let console = ConsoleAppender::builder().target(Target::Stdout).build();
@@ -426,7 +217,6 @@ mod tests {
             log_redirect: false,
             log_pattern: None,
             healthcheck: None,
-            startup_delay: Some(10),
             start_cmd: "timeout /t 10"
                 .split_whitespace()
                 .map(|s| s.to_string())
@@ -453,7 +243,7 @@ mod tests {
         let config = mock_config();
         let orders = config.services.keys().cloned().collect();
         let service_name = "service1";
-        init_processes(&config, orders).unwrap();
+        status::init_processes(&config, orders).unwrap();
         assert!(start_service(service_name, sender.clone()).is_ok());
         // Check if the event was sent
         let event = receiver.recv().unwrap();
@@ -461,7 +251,7 @@ mod tests {
         assert_eq!(event.pid.is_some(), true);
         assert_eq!(event.event_type, EventType::Running);
         thread::sleep(Duration::from_millis(100));
-        let service_info = find_readonly_proc_runtime(service_name).unwrap();
+        let service_info = status::find_readonly_proc_runtime(service_name).unwrap();
         assert_eq!(service_info.pid.is_some(), true);
         assert_eq!(service_info.is_child_process, true);
         assert_eq!(service_info.last_start_time.is_some(), true);
@@ -474,7 +264,7 @@ mod tests {
         let config = mock_config();
         let orders = config.services.keys().cloned().collect();
         let service_name = "service1";
-        init_processes(&config, orders).unwrap();
+        status::init_processes(&config, orders).unwrap();
         start_service(service_name, sender.clone()).unwrap();
         let _ = receiver.recv().unwrap();
         stop_service(service_name).unwrap();
@@ -483,7 +273,7 @@ mod tests {
         assert_eq!(stop_event.pid.is_some(), true);
         assert_eq!(stop_event.event_type, EventType::Stopped);
         thread::sleep(Duration::from_millis(100));
-        let service_info = find_readonly_proc_runtime(service_name).unwrap();
+        let service_info = status::find_readonly_proc_runtime(service_name).unwrap();
         assert_eq!(service_info.pid.is_none(), true);
         assert_eq!(service_info.last_stop_time.is_some(), true);
         assert_eq!(service_info.stopped_by_supervisor, true);

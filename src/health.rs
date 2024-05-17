@@ -1,6 +1,7 @@
 use crate::{
     config::HealthCheckConfig,
-    process::{self, manager::ProcessEvent},
+    event::{self, EventType, ProcessEvent},
+    process,
 };
 use lazy_static::lazy_static;
 use log::{info, warn};
@@ -76,9 +77,11 @@ fn do_watch_health(service_name: String, config: HealthCheckConfig, sender: Send
         if check_interval < 5 {
             check_interval = 5;
         }
+        let tx = sender.clone();
         if !success {
+            event::send_process_event(tx, &service_name, EventType::Unhealthy, None, None);
             let fail_times = incr_fail_times(&service_name);
-            let restart = fail_times > config.max_failures;
+            let restart: bool = fail_times > config.max_failures;
             if restart {
                 warn!("The health check failure count for service {} has exceeded the threshold, preparing to restart it", &service_name);
                 process::manager::restart_service(&service_name, sender.clone()).unwrap_or_else(
@@ -88,6 +91,8 @@ fn do_watch_health(service_name: String, config: HealthCheckConfig, sender: Send
                 );
                 check_interval += config.check_delay.unwrap_or(0);
             }
+        } else {
+            event::send_process_event(tx, &service_name, EventType::Healthy, None, None);
         }
         thread::sleep(Duration::from_secs(check_interval as u64));
     }
@@ -108,7 +113,7 @@ fn incr_fail_times(service_name: &str) -> i32 {
 }
 
 fn test_with_process(service_name: &str) -> bool {
-    process::manager::service_proc_is_running(service_name)
+    process::status::is_running_by_name(service_name)
 }
 
 fn test_with_http(url: &str) -> bool {

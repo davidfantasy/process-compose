@@ -1,13 +1,12 @@
 use anyhow::{Error, Result};
 use clap::Parser;
 use env::Args;
-use log::{error, info, warn};
-use process::manager::{EventType, ProcessEvent};
+use log::{error, info};
 use std::{
     process::exit,
     sync::{
         atomic::{AtomicBool, Ordering},
-        mpsc::{self, Receiver, Sender},
+        mpsc::{self},
         Arc,
     },
     thread,
@@ -15,10 +14,15 @@ use std::{
 };
 use sys_service::{control::control, manager::SysServiceProgram};
 
-use crate::config::{analyze_service_dependencies, load_config};
+use crate::{
+    config::{analyze_service_dependencies, load_config},
+    event::ProcessEvent,
+    process::status,
+};
 
 mod config;
 mod env;
+mod event;
 mod health;
 mod logger;
 mod process;
@@ -62,7 +66,8 @@ impl SysServiceProgram for Program {
     }
 
     fn stop(&self) -> anyhow::Result<()> {
-        process::manager::stop_all_services()?;
+        let all_services = process::status::get_all_process_name();
+        process::manager::stop_services(all_services)?;
         Ok(())
     }
 }
@@ -72,16 +77,18 @@ fn run() -> Result<()> {
     let config = config::current_config();
     let services_congfig = config.services.values().cloned().collect();
     let services_ordered = analyze_service_dependencies(&services_congfig)?;
-    process::manager::init_processes(&config, services_ordered)?;
+    process::status::init_processes(&config, services_ordered)?;
     env::create_services_home(&services_congfig)
         .unwrap_or_else(|e| error!("create service home failed: {}", e));
     //注册服务事件处理器，并启动配置的服务
     let (tx, rx) = mpsc::channel::<ProcessEvent>();
-    let msg_sender = tx.clone();
+    let event_sender1 = tx.clone();
+    let event_sender2 = tx.clone();
     thread::spawn(move || {
-        handle_process_event(msg_sender, rx);
+        event::handle_process_event(event_sender1, rx);
     });
-    process::manager::start_all_services(tx.clone())
+    let all_services = process::status::get_all_process_name();
+    process::manager::start_services(all_services, event_sender2)
         .unwrap_or_else(|e| error!("start service failed: {}", e));
     Ok(())
 }
@@ -95,48 +102,8 @@ fn wait_for_signal() {
         thread::sleep(Duration::from_secs(1));
     }
     info!("received a terminate signal,try to stop all services...");
-    process::manager::stop_all_services().unwrap_or_else(|e| error!("stop service failed: {}", e));
+    let all_services = process::status::get_all_process_name();
+    process::manager::stop_services(all_services)
+        .unwrap_or_else(|e| error!("stop service failed: {}", e));
     exit(0);
-}
-
-fn handle_process_event(sender: Sender<ProcessEvent>, rx: Receiver<ProcessEvent>) {
-    for received in rx {
-        match received.event_type {
-            EventType::Running => {
-                info!(
-                    "The {} service started with pid: {}",
-                    received.service_name,
-                    received
-                        .pid
-                        .map_or_else(|| "unknown".to_string(), |pid| pid.to_string())
-                );
-                let service_cfg = config::find_service_config(&received.service_name);
-                health::start_watch(
-                    received.service_name,
-                    service_cfg.unwrap().healthcheck,
-                    sender.clone(),
-                )
-            }
-            EventType::Exited => {
-                let pid = received
-                    .pid
-                    .map_or_else(|| "unknown".to_string(), |pid| pid.to_string());
-                let msg = received.data.or(Some("unknown".to_string())).unwrap();
-                warn!(
-                    "The {} service (pid: {}) has exited:{}",
-                    received.service_name, pid, msg
-                );
-            }
-            EventType::Stopped => {
-                let pid = received
-                    .pid
-                    .map_or_else(|| "unknown".to_string(), |pid| pid.to_string());
-                info!(
-                    "The {} service (pid: {}) has be stopped,will stop health watch",
-                    received.service_name, pid,
-                );
-                health::stop_watch(received.service_name)
-            }
-        }
-    }
 }
