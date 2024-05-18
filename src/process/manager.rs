@@ -30,7 +30,7 @@ pub fn start_services(services: Vec<String>) -> Result<()> {
         if dep_ok {
             start_service(name)?;
         } else {
-            info!("service [{}] has dependencies, add to pending list", name);
+            info!("[{}] has dependencies, add to pending list", name);
             let deps = service_info.unwrap().config.depends_on.clone().unwrap();
             pending::add_pending_service(name, deps)
         }
@@ -47,7 +47,7 @@ pub fn start_service(service_name: &str) -> Result<()> {
         let pid_val = pid.unwrap();
         if status::is_running_by_pid(pid_val) {
             info!(
-                "service [{}] is already running with pid {}!",
+                "[{}] is already running with pid {}!",
                 service_name, pid_val
             );
             event::send_process_event(service_name, EventType::Running, None, pid);
@@ -56,7 +56,7 @@ pub fn start_service(service_name: &str) -> Result<()> {
     }
     thread::spawn(move || {
         if let Err(err) = spawn_proc(Arc::clone(&conf)) {
-            error!("service [{}] exited with error: {}", svc_name, err);
+            error!("[{}] exited with error: {}", svc_name, err);
         }
     });
     Ok(())
@@ -76,7 +76,7 @@ pub fn stop_service(service_name: &str) -> Result<()> {
     let proc_runtime = status::find_readonly_proc_runtime(service_name)?;
     let pid = proc_runtime.pid;
     if pid.is_none() {
-        info!("service [{}]  is not running!", service_name);
+        info!("[{}]  is not running!", service_name);
         return Ok(());
     }
     let pid_val = pid.unwrap();
@@ -87,12 +87,12 @@ pub fn stop_service(service_name: &str) -> Result<()> {
     })?;
     if !is_running {
         info!(
-            "ignore stop command, service [{}]  is not running, pid: {}!",
+            "ignore stop command, [{}]  is not running, pid: {}!",
             service_name, pid_val
         );
         return Ok(());
     }
-    info!("service [{}] (pid: {}) is stopping", service_name, pid_val);
+    info!("[{}] (pid: {}) is stopping", service_name, pid_val);
     //首先尝试通过信号量的方式让进程自己退出
     if let Err(err) = terminate_process(pid_val) {
         warn!("signal {} (pid: {}) failed: {}", service_name, pid_val, err);
@@ -105,7 +105,7 @@ pub fn stop_service(service_name: &str) -> Result<()> {
     }
     //如果超过规定时间进程没有退出，则强制杀掉进程
     if is_running {
-        info!("service [{}] (pid: {}) is still running within the specified time after sending the interrupt signal, and is ready to be killed", service_name, pid_val);
+        info!("[{}] (pid: {}) is still running within the specified time after sending the interrupt signal, and is ready to be killed", service_name, pid_val);
         kill_process(pid_val)?;
     }
     Ok(())
@@ -151,7 +151,7 @@ fn spawn_proc(conf: Arc<ServiceConfig>) -> Result<()> {
     }
     if command.starts_with(".") {}
     before_exec(&mut cmd)?;
-    debug!("execute service [{}] start command:{}", svc_name, command);
+    debug!("execute [{}] start command:{}", svc_name, command);
     let child = cmd.spawn().map_err(|e| format!("{}", e));
     match child {
         Ok(mut child_proc) => {

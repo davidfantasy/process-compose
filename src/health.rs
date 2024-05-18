@@ -4,7 +4,7 @@ use crate::{
     process,
 };
 use lazy_static::lazy_static;
-use log::{debug, info, warn};
+use log::{info, warn};
 use std::{collections::HashMap, sync::RwLock, thread, time::Duration};
 
 lazy_static! {
@@ -14,7 +14,7 @@ lazy_static! {
 pub fn start_watch(service_name: String, config: Option<HealthCheckConfig>) {
     let health_cfg = config.clone(); // to avoid borrow count
     if health_cfg.is_none() || !health_cfg.unwrap().enable {
-        info!("service {} is not enabled to health check", &service_name);
+        info!("[{}] is not enabled to health check", &service_name);
         return;
     }
     if is_watching(&service_name) {
@@ -28,10 +28,7 @@ pub fn start_watch(service_name: String, config: Option<HealthCheckConfig>) {
 pub fn stop_watch(service_name: String) {
     let mut status = SERVICES_HEALTH_STATUS.write().unwrap();
     if !status.contains_key(&service_name) {
-        warn!(
-            "The service {} is not being watched, ignore stop",
-            &service_name
-        );
+        warn!("[{}] is not being watched, ignore stop", &service_name);
         return;
     }
     status.remove(&service_name);
@@ -54,11 +51,11 @@ fn do_watch_health(service_name: String, config: HealthCheckConfig) {
     if !is_watching(&service_name) {
         return;
     }
-    info!("service {} has enabled health checks", &service_name);
+    info!("[{}] has enabled health checks", &service_name);
     loop {
         if !is_watching(&service_name) {
             info!(
-                "service {} is not being watched, stop health check",
+                "[{}] is not being watched, stop health check",
                 &service_name
             );
             break;
@@ -73,9 +70,9 @@ fn do_watch_health(service_name: String, config: HealthCheckConfig) {
             let fail_times = incr_fail_times(&service_name);
             let restart: bool = fail_times > config.max_failures;
             if restart {
-                warn!("health check failure count for service {} has exceeded the threshold, preparing to restart it", &service_name);
+                warn!("health check failure count for [{}] has exceeded the threshold, preparing to restart it", &service_name);
                 process::manager::restart_service(&service_name).unwrap_or_else(|err| {
-                    warn!("restart service {} failed: {}", &service_name, err);
+                    warn!("restart [{}] failed: {}", &service_name, err);
                 });
                 check_interval += config.check_delay.unwrap_or(0);
             }

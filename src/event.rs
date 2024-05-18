@@ -70,7 +70,7 @@ pub fn handle_process_event(sender: Sender<ProcessEvent>, rx: Receiver<ProcessEv
         match received.event_type {
             EventType::Running => {
                 info!(
-                    "The {} service started with pid: {}",
+                    "[{}] started with pid: {}",
                     received.service_name,
                     received
                         .pid
@@ -85,7 +85,7 @@ pub fn handle_process_event(sender: Sender<ProcessEvent>, rx: Receiver<ProcessEv
                     .map_or_else(|| "unknown".to_string(), |pid| pid.to_string());
                 let msg = received.data.or(Some("unknown".to_string())).unwrap();
                 warn!(
-                    "The {} service (pid: {}) has exited:{}",
+                    "[{}] (pid: {}) has exited:{}",
                     received.service_name, pid, msg
                 );
             }
@@ -94,7 +94,7 @@ pub fn handle_process_event(sender: Sender<ProcessEvent>, rx: Receiver<ProcessEv
                     .pid
                     .map_or_else(|| "unknown".to_string(), |pid| pid.to_string());
                 info!(
-                    "The {} service (pid: {}) has be stopped,will stop health watch",
+                    "[{}] (pid: {}) has be stopped,will stop health watch",
                     received.service_name, pid,
                 );
                 health::stop_watch(received.service_name)
@@ -103,7 +103,7 @@ pub fn handle_process_event(sender: Sender<ProcessEvent>, rx: Receiver<ProcessEv
                 process::status::change_proc_health_status(&received.service_name, false)
                     .unwrap_or_else(|err| {
                         warn!(
-                            "change process {} health status failed: {}",
+                            "change [{}] health status failed: {}",
                             &received.service_name, err
                         );
                     });
@@ -112,7 +112,7 @@ pub fn handle_process_event(sender: Sender<ProcessEvent>, rx: Receiver<ProcessEv
                 process::status::change_proc_health_status(&received.service_name, true)
                     .unwrap_or_else(|err| {
                         warn!(
-                            "change process {} health status failed: {}",
+                            "change [{}] health status failed: {}",
                             &received.service_name, err
                         );
                     });
