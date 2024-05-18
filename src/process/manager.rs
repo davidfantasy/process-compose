@@ -22,16 +22,17 @@ pub fn start_services(services: Vec<String>) -> Result<()> {
     for name in services.iter() {
         let service_info = status::find_readonly_proc_runtime(name);
         if service_info.is_err() {
-            warn!("starting service {} not found:", name);
+            warn!("starting service [{}] not found:", name);
             continue;
         }
-        let service_info = service_info.unwrap();
-        let deps = &service_info.config.depends_on;
+        let dep_ok = status::check_dep_ok(name);
         //仅启动没有依赖的服务，其它服务加入待启动列表
-        if deps.is_some() {
-            pending::add_pending_service(name, deps.clone().unwrap())
-        } else {
+        if dep_ok {
             start_service(name)?;
+        } else {
+            info!("service [{}] has dependencies, add to pending list", name);
+            let deps = service_info.unwrap().config.depends_on.clone().unwrap();
+            pending::add_pending_service(name, deps)
         }
     }
     Ok(())
@@ -46,7 +47,7 @@ pub fn start_service(service_name: &str) -> Result<()> {
         let pid_val = pid.unwrap();
         if status::is_running_by_pid(pid_val) {
             info!(
-                "{} process is already running with pid {}!",
+                "service [{}] is already running with pid {}!",
                 service_name, pid_val
             );
             event::send_process_event(service_name, EventType::Running, None, pid);
@@ -55,7 +56,7 @@ pub fn start_service(service_name: &str) -> Result<()> {
     }
     thread::spawn(move || {
         if let Err(err) = spawn_proc(Arc::clone(&conf)) {
-            error!("{} exited with error: {}", svc_name, err);
+            error!("service [{}] exited with error: {}", svc_name, err);
         }
     });
     Ok(())
@@ -75,7 +76,7 @@ pub fn stop_service(service_name: &str) -> Result<()> {
     let proc_runtime = status::find_readonly_proc_runtime(service_name)?;
     let pid = proc_runtime.pid;
     if pid.is_none() {
-        info!("{} process is not running!", service_name);
+        info!("service [{}]  is not running!", service_name);
         return Ok(());
     }
     let pid_val = pid.unwrap();
@@ -86,12 +87,12 @@ pub fn stop_service(service_name: &str) -> Result<()> {
     })?;
     if !is_running {
         info!(
-            "ignore stop command, {} process is not running, pid: {}!",
+            "ignore stop command, service [{}]  is not running, pid: {}!",
             service_name, pid_val
         );
         return Ok(());
     }
-    info!("{} process (pid: {}) is stopping", service_name, pid_val);
+    info!("service [{}] (pid: {}) is stopping", service_name, pid_val);
     //首先尝试通过信号量的方式让进程自己退出
     if let Err(err) = terminate_process(pid_val) {
         warn!("signal {} (pid: {}) failed: {}", service_name, pid_val, err);
@@ -104,7 +105,7 @@ pub fn stop_service(service_name: &str) -> Result<()> {
     }
     //如果超过规定时间进程没有退出，则强制杀掉进程
     if is_running {
-        info!("{} process (pid: {}) is still running within the specified time after sending the interrupt signal, and is ready to be killed", service_name, pid_val);
+        info!("service [{}] (pid: {}) is still running within the specified time after sending the interrupt signal, and is ready to be killed", service_name, pid_val);
         kill_process(pid_val)?;
     }
     Ok(())
@@ -228,46 +229,48 @@ mod tests {
         global_config
     }
 
-    //#[test]
-    // fn test_start_service() {
-    //     init_test_log();
-    //     let (sender, receiver) = mpsc::channel();
-    //     let config = mock_config();
-    //     let orders = config.services.keys().cloned().collect();
-    //     let service_name = "service1";
-    //     status::init_processes(&config, orders).unwrap();
-    //     assert!(start_service(service_name).is_ok());
-    //     // Check if the event was sent
-    //     let event = receiver.recv().unwrap();
-    //     assert_eq!(event.service_name, service_name);
-    //     assert_eq!(event.pid.is_some(), true);
-    //     assert_eq!(event.event_type, EventType::Running);
-    //     thread::sleep(Duration::from_millis(100));
-    //     let service_info = status::find_readonly_proc_runtime(service_name).unwrap();
-    //     assert_eq!(service_info.pid.is_some(), true);
-    //     assert_eq!(service_info.is_child_process, true);
-    //     assert_eq!(service_info.last_start_time.is_some(), true);
-    // }
+    #[test]
+    fn test_start_service() {
+        init_test_log();
+        let (sender, receiver) = mpsc::channel();
+        event::set_sender(sender);
+        let config = mock_config();
+        let orders = config.services.keys().cloned().collect();
+        let service_name = "service1";
+        status::init_processes(&config, orders).unwrap();
+        assert!(start_service(service_name).is_ok());
+        // Check if the event was sent
+        let event = receiver.recv().unwrap();
+        assert_eq!(event.service_name, service_name);
+        assert_eq!(event.pid.is_some(), true);
+        assert_eq!(event.event_type, EventType::Running);
+        thread::sleep(Duration::from_millis(100));
+        let service_info = status::find_readonly_proc_runtime(service_name).unwrap();
+        assert_eq!(service_info.pid.is_some(), true);
+        assert_eq!(service_info.is_child_process, true);
+        assert_eq!(service_info.last_start_time.is_some(), true);
+    }
 
-    // #[test]
-    // fn test_stop_service() {
-    //     init_test_log();
-    //     let (sender, receiver) = mpsc::channel();
-    //     let config = mock_config();
-    //     let orders = config.services.keys().cloned().collect();
-    //     let service_name = "service1";
-    //     status::init_processes(&config, orders).unwrap();
-    //     start_service(service_name).unwrap();
-    //     let _ = receiver.recv().unwrap();
-    //     stop_service(service_name).unwrap();
-    //     let stop_event = receiver.recv().unwrap();
-    //     assert_eq!(stop_event.service_name, service_name);
-    //     assert_eq!(stop_event.pid.is_some(), true);
-    //     assert_eq!(stop_event.event_type, EventType::Stopped);
-    //     thread::sleep(Duration::from_millis(100));
-    //     let service_info = status::find_readonly_proc_runtime(service_name).unwrap();
-    //     assert_eq!(service_info.pid.is_none(), true);
-    //     assert_eq!(service_info.last_stop_time.is_some(), true);
-    //     assert_eq!(service_info.stopped_by_supervisor, true);
-    // }
+    #[test]
+    fn test_stop_service() {
+        init_test_log();
+        let (sender, receiver) = mpsc::channel();
+        event::set_sender(sender);
+        let config = mock_config();
+        let orders = config.services.keys().cloned().collect();
+        let service_name = "service1";
+        status::init_processes(&config, orders).unwrap();
+        start_service(service_name).unwrap();
+        let _ = receiver.recv().unwrap();
+        stop_service(service_name).unwrap();
+        let stop_event = receiver.recv().unwrap();
+        assert_eq!(stop_event.service_name, service_name);
+        assert_eq!(stop_event.pid.is_some(), true);
+        assert_eq!(stop_event.event_type, EventType::Stopped);
+        thread::sleep(Duration::from_millis(100));
+        let service_info = status::find_readonly_proc_runtime(service_name).unwrap();
+        assert_eq!(service_info.pid.is_none(), true);
+        assert_eq!(service_info.last_stop_time.is_some(), true);
+        assert_eq!(service_info.stopped_by_supervisor, true);
+    }
 }

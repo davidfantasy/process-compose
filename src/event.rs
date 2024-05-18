@@ -123,26 +123,7 @@ pub fn handle_process_event(sender: Sender<ProcessEvent>, rx: Receiver<ProcessEv
     error!("event handler has been stoped!!!!!!")
 }
 
-#[cfg(test)]
-mod tests {
-    use std::{sync::mpsc, thread, time::Duration};
-
-    use crate::logger;
-
-    use super::{send_process_event, ProcessEvent};
-
-    #[test]
-    fn test() {
-        logger::init_log("debug");
-        let (tx, rx) = mpsc::channel::<ProcessEvent>();
-        thread::spawn(move || {
-            super::handle_process_event(tx, rx);
-        });
-        thread::sleep(Duration::from_secs(1)); // 休眠2秒
-        send_process_event("test1", super::EventType::Running, None, None);
-        send_process_event("test2", super::EventType::Running, None, None);
-        send_process_event("test3", super::EventType::Running, None, None);
-        println!("1111111111111111111111111");
-        thread::sleep(Duration::from_secs(1));
-    }
+//only for unit test
+pub(crate) fn set_sender(sender: Sender<ProcessEvent>) {
+    EVENT_SENDER.write().unwrap().replace(sender);
 }

@@ -93,6 +93,24 @@ pub fn is_heathy(name: &str) -> Option<bool> {
     return proc_runtime.health;
 }
 
+pub fn check_dep_ok(name: &str) -> bool {
+    let service = find_readonly_proc_runtime(name);
+    if service.is_err() {
+        return false;
+    }
+    let deps = service.unwrap().config.depends_on.clone();
+    if deps.is_none() {
+        return true;
+    }
+    let deps = deps.unwrap();
+    for dep in deps {
+        if !is_heathy(&dep).unwrap_or(false) {
+            return false;
+        }
+    }
+    return true;
+}
+
 // 更新服务进程的运行状态至启动
 pub(crate) fn update_proc_to_started(
     service_name: &str,

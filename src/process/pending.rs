@@ -30,15 +30,8 @@ pub fn try_start_pending_service() {
     let mut started_services: Vec<String> = Vec::new();
     for (_, service) in pending_list.iter().enumerate() {
         let pending_service = service.read().unwrap();
-        let mut met = true;
         let name = &pending_service.name;
-        for dep in &pending_service.depends {
-            let health = status::is_heathy(&dep);
-            if health.is_none() || !health.unwrap() {
-                met = false;
-                break;
-            }
-        }
+        let met = status::check_dep_ok(name);
         if met {
             info!("startup dependency conditions for {} have been met", name);
             manager::start_service(&name).unwrap_or_else(|err| {
