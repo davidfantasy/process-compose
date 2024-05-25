@@ -1,7 +1,9 @@
+use std::str::FromStr;
 use std::{collections::HashMap, fs::File, io::Read, sync::RwLock};
 
 use anyhow::{Error, Result};
-use serde::{Deserialize, Serialize};
+use serde::de::Error as DeError;
+use serde::{de::Unexpected, Deserialize, Deserializer, Serialize};
 
 use crate::{env, health::HealthCheckType};
 
@@ -57,7 +59,12 @@ fn default_service_name() -> String {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct HealthCheckConfig {
+    #[serde(
+        default = "default_health_check_type",
+        deserialize_with = "deserialize_health_check_type"
+    )]
     pub test_type: HealthCheckType,
+    #[serde(default = "default_test_target")]
     pub test_target: String,
     #[serde(default = "default_check_interval")]
     pub interval: i32,
@@ -72,6 +79,23 @@ fn default_check_interval() -> i32 {
 
 fn default_max_failures() -> i32 {
     1
+}
+
+fn default_health_check_type() -> HealthCheckType {
+    HealthCheckType::Proccess
+}
+
+fn default_test_target() -> String {
+    "".to_string()
+}
+
+fn deserialize_health_check_type<'de, D>(deserializer: D) -> Result<HealthCheckType, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let s = String::deserialize(deserializer)?;
+    HealthCheckType::from_str(&s)
+        .map_err(|_| D::Error::custom(format!("invalid health check type: {}", s)))
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
