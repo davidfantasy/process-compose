@@ -9,11 +9,12 @@ services:
       log_redirect: false
       healthcheck: 
         enable: true    #是否启用健康检查
-        restart: true   #服务失败后是否尝试重启服务
-        url: http://localhost:23800/api/demo/test  #如果是web服务，可以配置健康检查接口，接口返回200认为是成功；默认仅检查进程是否仍在运行
-        interval: 10    #健康检查的间隔，秒
+        test_type: http  #支持http,cmd,tcp,process四种方式，默认是process即检查进程是否存活
+        test_target: http://localhost:23800/api/demo/test  #根据test_type的值决定测试目标，http方式需要配置http://开头的完整url，tcp方式需要配置ip:port，cmd方式需要配置待执行的命令
+        timeout: 5      #健康检查的超时时间，单位秒
+        interval: 10    #健康检查的间隔，单位秒
         retries: 3      #健康检查失败多少次判断服务失败
-        check_delay: 2 #启动后，多少秒后才开始第一次健康检查
+        start_period: 2 #该服务启动后所需的初始化时间，该期间不会进行健康检查
       #启动命令，这里对.的路径做了调整，指向了服务自己的主目录
       #例如 process-compose可执行文件放到了/home/nobody/app目录下
       #那么./runtime/bin/java实际的路径是/home/nobody/app/service1/runtime/bin/java

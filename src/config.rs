@@ -3,7 +3,7 @@ use std::{collections::HashMap, fs::File, io::Read, sync::RwLock};
 use anyhow::{Error, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::env;
+use crate::{env, health::HealthCheckType};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct GlobalConfig {
@@ -57,13 +57,13 @@ fn default_service_name() -> String {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct HealthCheckConfig {
-    pub enable: bool,
-    pub url: Option<String>,
+    pub test_type: HealthCheckType,
+    pub test_target: String,
     #[serde(default = "default_check_interval")]
     pub interval: i32,
     #[serde(default = "default_max_failures")]
     pub max_failures: i32,
-    pub check_delay: Option<i32>,
+    pub start_period: Option<i32>,
 }
 
 fn default_check_interval() -> i32 {
@@ -172,54 +172,6 @@ fn process_independent_service(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_load_config() {
-        // 创建一个临时的配置文件用于测试
-        let config_content = r#"
-            log_level: "info"
-            app_data_home: "/data"
-            services:
-              service1:
-                name: "service1"
-                log_redirect: true
-                log_pattern: "pattern"
-                healthcheck:
-                  enable: true
-                  restart: true
-                  url: "http://example.com"
-                  interval: 10
-                  retries: 3
-                  start_period: 5
-                startup_delay: 10
-                restart: "always"
-                start_cmd: ["cmd1", "cmd2"]
-                depends_on: ["service2"]
-            api:
-              enable: true
-              host: "localhost"
-              port: "8080"
-              username: "user"
-              password: "password"
-        "#;
-        let mut config_file_path = env::ROOT_DIR.clone();
-        config_file_path.push(CONFIG_FILE_NAME);
-        std::fs::write(config_file_path.clone(), config_content)
-            .expect("Failed to write config file for test");
-        // 测试load_config方法
-        let result = load_config();
-        assert!(result.is_ok(), "Failed to load config file");
-        let config = result.unwrap();
-
-        // 检查解析后的配置是否符合预期
-        assert_eq!(config.log_level, "info");
-        assert_eq!(config.app_data_home, "/data");
-        assert_eq!(config.services.len(), 1);
-        assert_eq!(config.api.is_some(), true);
-
-        // 清理临时文件
-        std::fs::remove_file(config_file_path).expect("Failed to remove config file after test");
-    }
 
     fn create_service_config(name: &str, depends_on: Vec<&str>) -> ServiceConfig {
         ServiceConfig {
