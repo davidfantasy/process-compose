@@ -29,7 +29,7 @@
 			|--  config.yaml    #process-compose的配置文件
 ```
      						
- 3.  编写一个config.yaml的配置文件，指定所管服务的信息，配置文件的项目如下：
+ 3.  编写一个config.yaml的配置文件，指定所管服务的信息，以下是一个模板：
 ```yaml
 log_level: info #日志等级
 app_data_home: D://tmp//process-compose//home #所管服务的数据目录，默认是当前用户的主目录的.process-compose文件夹
