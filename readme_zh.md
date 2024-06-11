@@ -18,7 +18,7 @@ process-compose是一个类似于docker-compose的轻量级替代品，只不过
  	**Process Compose** 能够将受管进程作为一个整体去启动，停止，重启等。只要配置好应用的相关参数，后续就能通过简单的命令来控制应用的启停，这对于微服务应用的开发调试非常方便。
  ## 使用方式
  Process Compose的使用方式非常简单，你只需要几步就能够将你的服务组装起来并执行：
-1. 你需要首先下载一个 **Process Compose** 的可执行文件，github仓库中提供了常见环境的二进制包的下载。如果你需要部署的环境没有提供，请自行编译源码。
+ 1. 你需要首先下载一个 **Process Compose** 的可执行文件，github仓库中提供了常见环境的二进制包的下载。如果你需要部署的环境没有提供，请自行编译源码。
  2.  准备好你自己的服务的启动文件和相关配置，可以将它们都放到Process Compose的同级目录，每个服务一个子目录，类似于：
  
 
@@ -44,7 +44,6 @@ services:
       #是否要重定向启动命令的日志输出到特定文件，作为服务日志（一般用于服务无法主动输出日志文件的场景），重定向的日志会放到{app_data_home}/{service_name}/logs目录下
       log_redirect: false
       healthcheck: 
-        enable: true    #是否启用健康检查
         test_type: http  #支持http,cmd,tcp,process四种方式，默认是process即检查进程是否存活
         test_target: http://localhost:23800/api/demo/test  #根据test_type的值决定测试目标，http方式需要配置http://开头的完整url，tcp方式需要配置ip:port，cmd方式需要配置待执行的命令
         timeout: 5      #健康检查的超时时间，单位秒
@@ -58,8 +57,6 @@ services:
     service2:
       log_redirect: true 
       healthcheck:
-        enable: true
-        restart: true 
         interval: 10 
         retries: 1    
         start_period: 5

@@ -48,7 +48,6 @@ services:
       # Whether to redirect the log output of the startup command to a specific file as the service log (generally used in scenarios where the service cannot actively output log files), the redirected log will be placed in the {app_data_home}/{service_name}/logs directory
       log_redirect: false
       healthcheck: 
-        enable: true    # Whether to enable health check
         test_type: http  # Supports four types: http, cmd, tcp, process. The default is process, which checks whether the process is alive
         test_target: http://localhost:23800/api/demo/test  # The test target is determined based on the value of test_type. For http, the complete URL starting with http:// needs to be configured; for tcp, the IP:port needs to be configured; for cmd, the command to be executed needs to be configured
         timeout: 5      # Timeout for health check, in seconds
@@ -62,8 +61,6 @@ services:
     service2:
       log_redirect: true 
       healthcheck:
-        enable: true
-        restart: true 
         interval: 10 
         retries: 1    
         start_period: 5
