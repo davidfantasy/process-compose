@@ -1,4 +1,4 @@
-**其他语言版本: [English](README.md), [中文](README_zh.md).**
+**其他语言版本: [English](readme.md), [中文](readme_zh.md).**
 
 process-compose是一个类似于docker-compose的轻量级替代品，只不过它编排的不是容器，而是进程。它采用类似docker-compose的YAML配置语法，对进程进行配置和管理，主要用于资源敏感环境下的微服务应用部署，以及开发测试环境快速的搭建微服务应用环境。
 ## 开发背景

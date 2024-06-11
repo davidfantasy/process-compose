@@ -1,4 +1,4 @@
-**Read this in other languages: [English](README.md), [中文](README_zh.md).**
+**Read this in other languages: [English](readme.md), [中文](readme_zh.md).**
 
 **Process Compose** is a lightweight alternative to docker-compose, but instead of orchestrating containers, it orchestrates processes. It uses a YAML configuration syntax similar to docker-compose to configure and manage processes, mainly for deploying microservices applications in resource-sensitive environments and quickly setting up microservices application environments in development and testing environments.
 
