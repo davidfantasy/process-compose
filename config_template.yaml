@@ -8,7 +8,6 @@ services:
       #是否要重定向启动命令的日志输出到特定文件，作为服务日志（一般用于服务无法主动输出日志文件的场景），重定向的日志会放到{app_data_home}/{service_name}/logs目录下
       log_redirect: false
       healthcheck: 
-        enable: true    #是否启用健康检查
         test_type: http  #支持http,cmd,tcp,process四种方式，默认是process即检查进程是否存活
         test_target: http://localhost:23800/api/demo/test  #根据test_type的值决定测试目标，http方式需要配置http://开头的完整url，tcp方式需要配置ip:port，cmd方式需要配置待执行的命令
         timeout: 5      #健康检查的超时时间，单位秒
